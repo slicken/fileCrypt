@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
@@ -12,74 +13,78 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 var iv = []byte("masterskey16bits")
 
 func printHelp() {
-	_, main := filepath.Split(os.Args[0])
-	fmt.Printf("Usage: %s [option] PASSWORD /path/filename\n", main)
+	_, app := filepath.Split(os.Args[0])
+	fmt.Printf("Usage: %s [option] /path/filename\n", app)
 	fmt.Println()
-	fmt.Printf("Options:\n")
+	fmt.Printf("Option:\n")
 	fmt.Printf(" -e,--encrypt\n")
 	fmt.Printf(" -d,--decrypt\n")
-	fmt.Printf(" -r,--read\n")
+	fmt.Printf("(no option reads encrypted file)\n")
 	fmt.Println()
 }
 
 func main() {
-	if len(os.Args) != 4 {
-		printHelp()
-		return
-	}
 	var mode, key, file string
-	for i, v := range os.Args {
-		switch i {
-		case 1:
-			if v == "-e" || v == "--encrypt" {
-				mode = "Encrypt"
 
-			} else if v == "-d" || v == "--decrypt" {
-				mode = "Decrypt"
-
-			} else if v == "-r" || v == "--read" {
-				mode = "Read"
-			} else {
-				printHelp()
-				return
-			}
-		case 2:
-			key = v
-		case 3:
+	for _, v := range os.Args {
+		switch v {
+		case "-e":
+			mode = "Encrypt"
+		case "--encrypt":
+			mode = "Encrypt"
+		case "-d":
+			mode = "Decrypt"
+		case "--dectrypt":
+			mode = "Decrypt"
+		default:
 			file = v
-			if _, err := os.Stat(file); os.IsNotExist(err) {
-				fmt.Printf("%s does not exist. try again\n", file)
-				return
-			}
 		}
 	}
 
-	var wBytes []byte
-	rBytes, err := ioutil.ReadFile(file)
+	if file == "" || len(os.Args) == 1 {
+		printHelp()
+		return
+	}
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		fmt.Printf("%s does not exist. try again\n", file)
+		return
+	}
+
+	// -------------------
+
+	var w []byte
+	r, err := ioutil.ReadFile(file)
 	if err != nil {
 		panic(err)
 	}
 	if mode == "Encrypt" {
-		wBytes, err = encrypt(rBytes, key)
+		key = SetPassword(3, "*")
+
+		w, err = encrypt(r, key)
 		if err != nil {
 			panic(err)
 		}
 	} else {
-		wBytes, err = decrypt(rBytes, key)
+		key = AskPassword()
+
+		w, err = decrypt(r, key)
 		if err != nil {
-			panic(err)
+			fmt.Println("Wrong Password")
+			return
 		}
 	}
-	if mode == "Read" {
-		fmt.Printf(string(wBytes))
+	if mode == "" {
+		fmt.Printf(string(w))
 
 	} else {
-		err = ioutil.WriteFile(file, wBytes, 0644)
+		err = ioutil.WriteFile(file, w, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -87,14 +92,14 @@ func main() {
 	}
 }
 
-func createHash(key string) string {
+func md5hash(key string) string {
 	hasher := md5.New()
 	hasher.Write([]byte(key))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func encrypt(data []byte, passphrase string) ([]byte, error) {
-	block, _ := aes.NewCipher([]byte(createHash(passphrase)))
+	block, _ := aes.NewCipher([]byte(md5hash(passphrase)))
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
@@ -109,7 +114,7 @@ func encrypt(data []byte, passphrase string) ([]byte, error) {
 }
 
 func decrypt(data []byte, passphrase string) ([]byte, error) {
-	key := []byte(createHash(passphrase))
+	key := []byte(md5hash(passphrase))
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -132,4 +137,66 @@ func decrypt(data []byte, passphrase string) ([]byte, error) {
 	}
 
 	return plaintext, nil
+}
+
+func AskPassword() string {
+	fmt.Printf("Enter Password: ")
+
+	pw, _ := maskInput("*")
+	return string(pw)
+}
+
+func SetPassword(lenght int, mask string) string {
+	var pw string
+
+	for {
+		fmt.Printf("Enter Password: ")
+		password, _ := maskInput(mask)
+
+		if len(password) < lenght {
+			fmt.Printf("Password must contain at least %d charecters, try again.\n", lenght)
+			continue
+		}
+
+		fmt.Printf("Confirm Password: ")
+		confirm, _ := maskInput(mask)
+
+		if !bytes.Equal(password, confirm) {
+			fmt.Printf("Password did not match, try again.\n")
+			continue
+		}
+
+		pw = string(password)
+		break
+	}
+
+	return pw
+}
+
+func maskInput(mask string) ([]byte, error) {
+	fd := int(os.Stdin.Fd())
+	state, err := terminal.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	defer terminal.Restore(fd, state)
+
+	// read and manipulate stdin
+	var buf []byte
+	for {
+		var b [1]byte
+		n, err := os.Stdin.Read(b[:])
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if n == 0 || b[0] == '\n' || b[0] == '\r' {
+			break
+		}
+
+		buf = append(buf, b[0])
+		fmt.Printf(mask)
+	}
+
+	fmt.Printf("\r\n")
+	return buf, nil
 }
