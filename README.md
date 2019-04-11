@@ -1,10 +1,12 @@
 # filecrypt
-Simple file Encrypter/Decrypter written in Go
+Simple file Encrypter/Decrypter written in Go<br>
+It prompts (and masks) for password when reading or encrypt-/decrypt files<br>
 <br>
-Usage: filecrypt [option] <password> /path/filename<br>
+Usage: filecrypt [option] /path/filename<br>
 <br>
 Options:<br>
  -e,--encrypt<br>
  -d,--decrypt<br>
- -r,--read<br>
+(no option reads encrypted file)
  <br>
+
