@@ -26,7 +26,7 @@ func printHelp() {
 	fmt.Printf("Option:\n")
 	fmt.Printf(" -e,--encrypt\n")
 	fmt.Printf(" -d,--decrypt\n")
-	fmt.Printf("(no option reads encrypted file)\n")
+	fmt.Printf("(empty option will read encrypted file)\n")
 	fmt.Println()
 }
 
