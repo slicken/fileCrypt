@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
@@ -8,16 +9,19 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"golang.org/x/crypto/ssh/terminal"
 )
 
 var iv = []byte("masterskey16bits")
+var _, app = filepath.Split(os.Args[0])
 
 func printHelp() {
 	_, app := filepath.Split(os.Args[0])
@@ -26,23 +30,21 @@ func printHelp() {
 	fmt.Printf("Option:\n")
 	fmt.Printf(" -e,--encrypt\n")
 	fmt.Printf(" -d,--decrypt\n")
-	fmt.Printf("(empty option will read encrypted file)\n")
+	fmt.Printf("(no option reads file)\n")
 	fmt.Println()
 }
 
 func main() {
-	var mode, key, file string
+	var mode, file string
 
 	for _, v := range os.Args {
 		switch v {
-		case "-e":
+		case "-e", "--encrypt":
 			mode = "Encrypt"
-		case "--encrypt":
-			mode = "Encrypt"
-		case "-d":
+
+		case "-d", "--dectrypt":
 			mode = "Decrypt"
-		case "--dectrypt":
-			mode = "Decrypt"
+
 		default:
 			file = v
 		}
@@ -52,44 +54,54 @@ func main() {
 		printHelp()
 		return
 	}
+
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		fmt.Printf("%s does not exist. try again\n", file)
 		return
 	}
 
-	// -------------------
-
-	var w []byte
+	// ---
+	var w, pw []byte
 	r, err := ioutil.ReadFile(file)
 	if err != nil {
 		panic(err)
 	}
-	if mode == "Encrypt" {
-		key = SetPassword(3, "*")
 
-		w, err = encrypt(r, key)
+	if mode == "Encrypt" {
+		pw, err = SetPassword(3)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		w, err = encrypt(r, string(pw))
 		if err != nil {
 			panic(err)
 		}
-	} else {
-		key = AskPassword()
+	}
 
-		w, err = decrypt(r, key)
+	if mode == "Decrypt" || mode == "" {
+		pw, err = Prompt("Enter password: ", true)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		w, err = decrypt(r, string(pw))
 		if err != nil {
 			fmt.Println("Wrong Password")
 			return
 		}
 	}
+
 	if mode == "" {
 		fmt.Printf(string(w))
-
-	} else {
-		err = ioutil.WriteFile(file, w, 0644)
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("Successfully %sed %s\n", mode, file)
+		return
 	}
+
+	// write file
+	if err = ioutil.WriteFile(file, w, 0644); err != nil {
+		panic(err)
+	}
+	fmt.Printf("Successfully %sed %s\n", mode, file)
 }
 
 func md5hash(key string) string {
@@ -139,64 +151,62 @@ func decrypt(data []byte, passphrase string) ([]byte, error) {
 	return plaintext, nil
 }
 
-func AskPassword() string {
-	fmt.Printf("Enter Password: ")
-
-	pw, _ := maskInput("*")
-	return string(pw)
-}
-
-func SetPassword(lenght int, mask string) string {
-	var pw string
-
-	for {
-		fmt.Printf("Enter Password: ")
-		password, _ := maskInput(mask)
-
-		if len(password) < lenght {
-			fmt.Printf("Password must contain at least %d charecters, try again.\n", lenght)
-			continue
-		}
-
-		fmt.Printf("Confirm Password: ")
-		confirm, _ := maskInput(mask)
-
-		if !bytes.Equal(password, confirm) {
-			fmt.Printf("Password did not match, try again.\n")
-			continue
-		}
-
-		pw = string(password)
-		break
-	}
-
-	return pw
-}
-
-func maskInput(mask string) ([]byte, error) {
-	fd := int(os.Stdin.Fd())
-	state, err := terminal.MakeRaw(fd)
+// SetPassword ...
+func SetPassword(min int) ([]byte, error) {
+	password, err := Prompt("Enter password: ", true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("password error: %s", err)
 	}
-	defer terminal.Restore(fd, state)
-
-	// read and manipulate stdin
-	var buf []byte
-	for {
-		var b [1]byte
-		n, err := os.Stdin.Read(b[:])
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
-		if n == 0 || b[0] == '\n' || b[0] == '\r' {
-			break
-		}
-
-		buf = append(buf, b[0])
-		fmt.Printf(mask)
+	if len(password) < min {
+		fmt.Printf("Password must contain at least %d charecters\n", min)
 	}
-
-	fmt.Printf("\r\n")
-	return buf, nil
+	confirm, err := Prompt("Confirm password: ", true)
+	if err != nil {
+		return nil, fmt.Errorf("confirmation error: %s", err)
+	}
+	if !bytes.Equal(password, confirm) {
+		return nil, errors.New("passwords did not match")
+	}
+	return password, nil
 }
+
+// Prompt for input ...
+func Prompt(input string, hidden bool) (b []byte, err error) {
+	defer fmt.Println()
+	fmt.Printf(input)
+
+	if hidden {
+		return terminal.ReadPassword(int(syscall.Stdin))
+	} else {
+		_, err = fmt.Fscanln(bufio.NewReader(os.Stdin), &b)
+	}
+	return b, err
+}
+
+// func maskInput(mask string) ([]byte, error) {
+// 	fd := int(os.Stdin.Fd())
+// 	state, err := terminal.MakeRaw(fd)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer terminal.Restore(fd, state)
+
+// 	// read and manipulate stdin
+// 	var buf []byte
+// 	for {
+// 		var b [1]byte
+// 		n, err := os.Stdin.Read(b[:])
+// 		if err != nil && err != io.EOF {
+// 			return nil, err
+// 		}
+// 		if n == 0 || b[0] == '\n' || b[0] == '\r' {
+// 			break
+// 		}
+
+// 		buf = append(buf, b[0])
+// 		fmt.Printf(mask)
+// 	}
+
+// 	fmt.Printf("\r\n")
+// 	return buf, nil
+// }
