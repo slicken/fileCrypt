@@ -21,7 +21,6 @@ import (
 )
 
 var iv = []byte("masterskey16bits")
-var _, app = filepath.Split(os.Args[0])
 
 func printHelp() {
 	_, app := filepath.Split(os.Args[0])
@@ -92,11 +91,6 @@ func main() {
 		}
 	}
 
-	if mode == "" {
-		fmt.Printf(string(w))
-		return
-	}
-
 	// write file
 	if err = ioutil.WriteFile(file, w, 0644); err != nil {
 		panic(err)
@@ -152,13 +146,13 @@ func decrypt(data []byte, passphrase string) ([]byte, error) {
 }
 
 // SetPassword ...
-func SetPassword(min int) ([]byte, error) {
+func SetPassword(minLenght int) ([]byte, error) {
 	password, err := Prompt("Enter password: ", true)
 	if err != nil {
 		return nil, fmt.Errorf("password error: %s", err)
 	}
-	if len(password) < min {
-		fmt.Printf("Password must contain at least %d charecters\n", min)
+	if len(password) < minLenght {
+		fmt.Printf("Password must contain at least %d charecters\n", minLenght)
 	}
 	confirm, err := Prompt("Confirm password: ", true)
 	if err != nil {
